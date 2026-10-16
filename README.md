@@ -1,114 +1,57 @@
 # SecTool Suite
 
-A Python-based command-line security toolkit that combines basic security utilities in one interactive menu.
+A small Python cybersecurity learning project containing defensive log analysis, basic TCP port checks, authorized website path checks, SHA-256 hashing, file integrity verification, and JSON reports.
 
 ## Features
 
-### 1. Port Scanner
-- Scans a predefined list of TCP ports on a target IP address.
-- Identifies ports that accept TCP connections.
-- Uses connection timeouts to avoid waiting too long on unresponsive ports.
+- **Log Analyzer:** extracts valid and invalid IPv4 addresses and reports line numbers.
+- **Brute-force detection:** flags an IP with at least N failed-login events inside a rolling time window.
+- **TCP Port Scanner:** scans user-selected ports on an IPv4 target.
+- **Directory Scanner:** checks common paths on an explicitly authorized website.
+- **SHA-256 tools:** hashes text/files and verifies file integrity.
+- **JSON reports:** save log, brute-force, port, and directory scan results.
+- **Automated tests:** run with `unittest`.
 
-Ports scanned: `21`, `22`, `80`, `443`, `3306`, `8080`.
+## Setup (Windows PowerShell)
 
-### 2. Web Directory Scanner
-- Checks a predefined list of common web paths.
-- Reports HTTP `200` responses and `403` responses.
-- Uses request timeouts and handles connection failures.
-
-Paths checked: `admin`, `login`, `dashboard`, `images`, `config`, `test`.
-
-### 3. Log IP Extractor
-- Extracts IPv4-like patterns from sample log data.
-- Uses regular expressions to identify IP address patterns.
-- Prints the extracted results.
-
-The current version analyzes sample data embedded in the Python script.
-
-### 4. SHA-256 Hash Generator
-- Accepts text from the user.
-- Generates a SHA-256 hash using Python's `hashlib` module.
-- Prints the resulting hexadecimal digest.
-
-## Requirements
-
-- Python 3.10 or later
-- `requests` library
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone <YOUR-REPOSITORY-URL>
-cd <YOUR-REPOSITORY-DIRECTORY>
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-Install the required dependency:
+If PowerShell blocks activation, you can skip activation and run:
+`\.venv\Scripts\python.exe -m pip install -r requirements.txt`
 
-```bash
-python -m pip install requests
+## Run interactive menu
+
+```powershell
+python sectool.py
 ```
 
-## Usage
+## CLI examples
 
-Run the program:
-
-```bash
-python main.py
+```powershell
+python sectool.py log samples/sample.log
+python sectool.py log samples/sample.log --json reports/log-report.json
+python sectool.py bruteforce samples/bruteforce.log --threshold 3 --window 5 --json reports/bruteforce-report.json
+python sectool.py hash "hello world"
+python sectool.py hash samples/sample.log --file
+python sectool.py verify samples/sample.log YOUR_EXPECTED_SHA256
+python sectool.py ports 127.0.0.1 --ports 22,80,443
+python sectool.py dirs https://example.com
 ```
 
-Replace `main.py` with the actual Python filename if it is different.
+Use network-scanning features only against systems you own or have explicit permission to test. A closed-or-filtered port result does not prove that a service is absent; a firewall may be blocking probes.
 
-Choose an option from the interactive menu:
+## Tests
 
-1. Port Scanner
-2. Web Directory Scanner
-3. Log IP Extractor
-4. Hash Generator
-5. Exit
-
-## Example
-
-Example output from the port scanner:
-
-```text
---- [1] Port Scanner ---
-Enter target IP (e.g., 127.0.0.1): 127.0.0.1
-[*] Scanning 127.0.0.1...
-[+] Port 80 is OPEN
+```powershell
+python -m unittest discover -v
 ```
 
-The output depends on the target system and the services listening on its ports.
+The tests mock network calls and do not scan external systems.
 
-## Technologies Used
+## Scope and limitations
 
-- Python
-- `socket` for TCP connection checks
-- `requests` for HTTP requests
-- `re` for pattern matching
-- `hashlib` for SHA-256 hashing
-- `datetime` imported for potential future use
-
-## Limitations
-
-- The port list is predefined and cannot currently be customized through the menu.
-- The directory wordlist is predefined.
-- The log extractor uses hardcoded sample data rather than reading log files.
-- The IP extraction pattern does not validate whether each extracted address is a valid IPv4 address.
-- The hash generator hashes text, not files.
-- Automated tests and report exports are not included in this version.
-
-## Responsible Use
-
-Use this tool only on systems and websites you own or have explicit permission to test.
-
-Avoid scanning third-party systems without authorization.
-
-## Project Status
-
-This project is an educational prototype. Future improvements may include input validation, better error handling, log file analysis, automated tests, and JSON report generation.
-
-## License
-
-No license has been added yet. Add a license file before permitting others to reuse or distribute this project.
+This is an educational starter toolkit, not a production-grade SIEM or vulnerability scanner. Brute-force detection depends on the log format shown in `samples/bruteforce.log`. Events without a parseable timestamp, a valid IPv4 address, and the phrase `Failed login` are ignored.

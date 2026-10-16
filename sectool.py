@@ -1,234 +1,139 @@
+import argparse
+import json
+import sys
 
-import socket
-import requests
-import re
-import hashlib
-import ipaddress
-from urllib.parse import urlparse
-
-
-# -------------------- Banner --------------------
-
-def banner():
-    print("-" * 50)
-    print("       SecTool Suite - Security Toolkit")
-    print("-" * 50)
+from sectool.dir_scanner import scan_directories
+from sectool.hash_tools import sha256_file, sha256_text, verify_file_hash
+from sectool.log_analyzer import analyze_log_file, detect_brute_force
+from sectool.port_scanner import scan_ports
+from sectool.reporting import save_json_report
 
 
-# -------------------- Port Scanner --------------------
+def print_json(data):
+    print(json.dumps(data, indent=2, ensure_ascii=False))
 
-def port_scanner():
-    print("\n--- [1] Port Scanner ---")
 
-    target = input("Enter target IP (e.g., 127.0.0.1): ").strip()
-
-    try:
-        ipaddress.ip_address(target)
-    except ValueError:
-        print("[-] Invalid IP address.")
-        return
-
-    ports = [21, 22, 80, 443, 3306, 8080]
-
-    print(f"\n[*] Scanning {target}...")
-    print("[*] Only scan systems you own or have permission to test.\n")
-
-    for port in ports:
+def run_menu():
+    while True:
+        print("\n========== SecTool Suite ==========")
+        print("1. Port Scanner")
+        print("2. Directory Scanner")
+        print("3. Log Analyzer")
+        print("4. SHA256 Text Hash")
+        print("5. File Integrity Checker")
+        print("0. Exit")
+        choice = input("\nChoose an option: ").strip()
         try:
-            with socket.socket(
-                socket.AF_INET,
-                socket.SOCK_STREAM
-            ) as sock:
-                sock.settimeout(0.5)
-                result = sock.connect_ex((target, port))
-
-            if result == 0:
-                print(f"[+] Port {port}: OPEN")
+            if choice == "1":
+                target = input("Target IPv4 (authorized target only): ").strip()
+                raw_ports = input("Ports comma-separated [21,22,80,443,3306,8080]: ").strip()
+                ports = [int(p.strip()) for p in raw_ports.split(",")] if raw_ports else [21, 22, 80, 443, 3306, 8080]
+                timeout = float(input("Timeout seconds [1]: ").strip() or "1")
+                print_json(scan_ports(target, ports, timeout))
+            elif choice == "2":
+                url = input("Base URL (authorized target only): ").strip()
+                print_json(scan_directories(url))
+            elif choice == "3":
+                path = input("Log path [samples/sample.log]: ").strip() or "samples/sample.log"
+                print_json(analyze_log_file(path))
+                use_brute = input("Also detect brute-force attempts? (y/N): ").strip().lower()
+                if use_brute == "y":
+                    threshold = int(input("Failed attempts threshold [3]: ").strip() or "3")
+                    window = int(input("Window minutes [5]: ").strip() or "5")
+                    print_json(detect_brute_force(path, threshold, window))
+            elif choice == "4":
+                print("SHA256:", sha256_text(input("Text to hash: ")))
+            elif choice == "5":
+                path = input("File path: ").strip()
+                expected = input("Expected SHA256 (leave blank to calculate only): ").strip()
+                actual = sha256_file(path)
+                print("SHA256:", actual)
+                if expected:
+                    print("Matches expected hash:", verify_file_hash(path, expected)["matches"])
+            elif choice == "0":
+                print("Goodbye!")
+                return
             else:
-                print(f"[-] Port {port}: CLOSED or FILTERED")
-
-        except OSError as error:
-            print(f"[!] Port {port}: Error - {error}")
-
-
-# -------------------- Directory Scanner --------------------
-
-def dir_scanner():
-    print("\n--- [2] Web Directory Scanner ---")
-
-    target = input(
-        "Enter authorized test URL (e.g., http://127.0.0.1:8000): "
-    ).strip()
-
-    parsed_url = urlparse(target)
-
-    if (
-        parsed_url.scheme not in ("http", "https")
-        or not parsed_url.hostname
-        or parsed_url.username
-        or parsed_url.password
-    ):
-        print("[-] Invalid URL. Enter a valid HTTP or HTTPS URL.")
-        return
-
-    wordlist = [
-        "admin",
-        "login",
-        "dashboard",
-        "images",
-        "config",
-        "test",
-    ]
-
-    target = target.rstrip("/")
-
-    print(f"\n[*] Scanning {target}...")
-    print("[*] Use only on systems you are authorized to test.\n")
-
-    try:
-        for word in wordlist:
-            url = f"{target}/{word}"
-
-            try:
-                response = requests.get(
-                    url,
-                    timeout=3,
-                    allow_redirects=False,
-                )
-
-                status = response.status_code
-
-                if status == 200:
-                    print(f"[+] Found (200): {url}")
-                elif status == 403:
-                    print(f"[!] Forbidden (403): {url}")
-                elif 300 <= status < 400:
-                    print(f"[*] Redirect ({status}): {url}")
-                elif status == 404:
-                    print(f"[-] Not Found (404): {url}")
-                elif status == 429:
-                    print(f"[!] Rate limited (429): {url}")
-
-            except requests.exceptions.Timeout:
-                print(f"[!] Request timed out: {url}")
-
-            except requests.exceptions.RequestException as error:
-                print(f"[-] Request failed: {error}")
-                break
-
-    except KeyboardInterrupt:
-        print("\n[!] Scan interrupted by user.")
+                print("Invalid choice. Please choose 0-5.")
+        except (ValueError, OSError) as exc:
+            print(f"Error: {exc}")
 
 
-# -------------------- Log IP Extractor --------------------
+def build_parser():
+    parser = argparse.ArgumentParser(description="Small defensive security toolkit for authorized testing.")
+    sub = parser.add_subparsers(dest="command")
 
-def log_extractor():
-    print("\n--- [3] Log IP Extractor ---")
+    log_parser = sub.add_parser("log", help="Extract valid/invalid IPs from a log file")
+    log_parser.add_argument("file", nargs="?", default="samples/sample.log")
+    log_parser.add_argument("--json", dest="report", help="Save output to a JSON report")
 
-    log_file = input(
-        "Enter log file path (default: samples/sample.log): "
-    ).strip()
+    brute = sub.add_parser("bruteforce", help="Detect repeated failed logins in a time window")
+    brute.add_argument("file", nargs="?", default="samples/bruteforce.log")
+    brute.add_argument("--threshold", type=int, default=3)
+    brute.add_argument("--window", type=int, default=5)
+    brute.add_argument("--json", dest="report", help="Save output to a JSON report")
 
-    if not log_file:
-        log_file = "samples/sample.log"
+    ports = sub.add_parser("ports", help="Scan TCP ports on an authorized IPv4 target")
+    ports.add_argument("target")
+    ports.add_argument("--ports", default="21,22,80,443,3306,8080")
+    ports.add_argument("--timeout", type=float, default=1.0)
+    ports.add_argument("--json", dest="report", help="Save output to a JSON report")
 
-    ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+    dirs = sub.add_parser("dirs", help="Check common paths on an authorized website")
+    dirs.add_argument("url")
+    dirs.add_argument("--timeout", type=float, default=5)
+    dirs.add_argument("--json", dest="report", help="Save output to a JSON report")
 
-    valid_ips = []
-    invalid_ips = []
+    hash_parser = sub.add_parser("hash", help="Calculate SHA256 of text or a file")
+    hash_parser.add_argument("value", help="Text to hash, or file path with --file")
+    hash_parser.add_argument("--file", action="store_true", help="Treat value as a file path")
 
-    try:
-        with open(log_file, "r", encoding="utf-8") as file:
-            for line_number, line in enumerate(file, start=1):
-                candidates = re.findall(ip_pattern, line)
+    verify = sub.add_parser("verify", help="Compare a file SHA256 against an expected hash")
+    verify.add_argument("file")
+    verify.add_argument("expected")
 
-                for candidate in candidates:
-                    try:
-                        ipaddress.IPv4Address(candidate)
-                        valid_ips.append((candidate, line_number))
+    return parser
 
-                    except ipaddress.AddressValueError:
-                        invalid_ips.append((candidate, line_number))
-
-        if valid_ips:
-            print("\n[+] Valid IP addresses:")
-
-            for ip, line_number in valid_ips:
-                print(f" -> {ip} (line {line_number})")
-        else:
-            print("\n[-] No valid IPv4 addresses found.")
-
-        if invalid_ips:
-            print("\n[!] Invalid IP addresses ignored:")
-
-            for ip, line_number in invalid_ips:
-                print(f" -> {ip} (line {line_number})")
-
-        print(f"\n[*] Valid IP occurrences: {len(valid_ips)}")
-        print(f"[*] Invalid IP occurrences: {len(invalid_ips)}")
-
-    except FileNotFoundError:
-        print(f"[-] File not found: {log_file}")
-
-    except UnicodeDecodeError:
-        print("[-] Could not decode the file as UTF-8.")
-
-    except OSError as error:
-        print(f"[-] Could not read file: {error}")
-
-
-# -------------------- SHA-256 Hash Generator --------------------
-
-def hash_generator():
-    print("\n--- [4] SHA-256 Hash Generator ---")
-
-    text = input("Enter text to hash: ")
-
-    hash_result = hashlib.sha256(
-        text.encode("utf-8")
-    ).hexdigest()
-
-    print(f"\n[+] SHA-256 Hash: {hash_result}")
-
-
-# -------------------- Main Menu --------------------
 
 def main():
-    while True:
-        banner()
-
-        print("1. Port Scanner")
-        print("2. Web Directory Scanner")
-        print("3. Log IP Extractor")
-        print("4. SHA-256 Hash Generator")
-        print("5. Exit")
-
-        choice = input("\nSelect an option (1-5): ").strip()
-
-        if choice == "1":
-            port_scanner()
-
-        elif choice == "2":
-            dir_scanner()
-
-        elif choice == "3":
-            log_extractor()
-
-        elif choice == "4":
-            hash_generator()
-
-        elif choice == "5":
-            print("\nExiting SecTool Suite.")
-            break
-
-        else:
-            print("\n[-] Invalid choice. Select a number from 1 to 5.")
-
-        input("\nPress Enter to continue...")
+    parser = build_parser()
+    args = parser.parse_args()
+    if not args.command:
+        run_menu()
+        return 0
+    try:
+        if args.command == "log":
+            result = analyze_log_file(args.file)
+            print_json(result)
+            if args.report:
+                print(f"Report saved: {save_json_report(result, args.report)}")
+        elif args.command == "bruteforce":
+            result = detect_brute_force(args.file, args.threshold, args.window)
+            print_json(result)
+            if args.report:
+                print(f"Report saved: {save_json_report(result, args.report)}")
+        elif args.command == "ports":
+            port_list = [int(part.strip()) for part in args.ports.split(",")]
+            result = scan_ports(args.target, port_list, args.timeout)
+            print_json(result)
+            if args.report:
+                print(f"Report saved: {save_json_report(result, args.report)}")
+        elif args.command == "dirs":
+            result = scan_directories(args.url, timeout=args.timeout)
+            print_json(result)
+            if args.report:
+                print(f"Report saved: {save_json_report(result, args.report)}")
+        elif args.command == "hash":
+            print(sha256_file(args.value) if args.file else sha256_text(args.value))
+        elif args.command == "verify":
+            result = verify_file_hash(args.file, args.expected)
+            print_json(result)
+            return 0 if result["matches"] else 1
+    except (ValueError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n[!] Program interrupted.")
+    raise SystemExit(main())
